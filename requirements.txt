@@ -1,9 +1,6 @@
-fastapi
-uvicorn
-pandas
-scikit-learn
-pdfplumber
-langchain
-openai
-python-multipart
-spacy
+streamlit>=1.32.0
+requests>=2.31.0
+pandas>=2.2.0
+plotly>=5.18.0
+numpy>=1.24.0
+python-dotenv>=1.0.0
