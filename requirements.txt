@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pandas
+scikit-learn
+pdfplumber
+langchain
+openai
+python-multipart
+spacy
