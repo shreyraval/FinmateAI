@@ -1,9 +1,16 @@
 import streamlit as st
 import requests
 import pandas as pd
-import plotly.express as px
 
-st.title("FinMateAI – Upload Bank Statement")
+# Try to import plotly, but provide fallback if not available
+try:
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("Plotly is not installed. Some visualizations will be simplified.")
+
+st.title("FinMateAI - Upload Bank Statement")
 
 uploaded = st.file_uploader("Choose PDF or CSV")
 
@@ -38,15 +45,21 @@ if uploaded:
                 summary_df = pd.DataFrame(data['categorized']['summary']).T
                 st.dataframe(summary_df)
                 
-                # Create spending chart
+                # Create spending visualization
                 st.subheader("Spending Distribution")
-                fig = px.pie(
-                    df[df['amount'] < 0],  # Only show expenses
-                    values='amount',
-                    names='category',
-                    title='Spending by Category'
-                )
-                st.plotly_chart(fig)
+                if PLOTLY_AVAILABLE:
+                    # Use Plotly for interactive visualization
+                    fig = px.pie(
+                        df[df['amount'] < 0],  # Only show expenses
+                        values='amount',
+                        names='category',
+                        title='Spending by Category'
+                    )
+                    st.plotly_chart(fig)
+                else:
+                    # Fallback to Streamlit's built-in chart
+                    spending_by_category = df[df['amount'] < 0].groupby('category')['amount'].sum().abs()
+                    st.bar_chart(spending_by_category)
                 
                 # Display total spending
                 total_spending = abs(df[df['amount'] < 0]['amount'].sum())
