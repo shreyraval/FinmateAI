@@ -1,113 +1,167 @@
 import pandas as pd
-from typing import Dict, List, Any
+import numpy as np
+from typing import Dict, List, Optional
+import joblib
+import os
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.cluster import KMeans
 import logging
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Define transaction categories
-CATEGORIES = {
-    "FOOD": ["whole foods", "trader joe's", "safeway", "restaurant", "cafe", "coffee"],
-    "ENTERTAINMENT": ["netflix", "spotify", "hulu", "amazon prime", "movie", "theater"],
-    "TRANSPORTATION": ["uber", "lyft", "taxi", "gas", "fuel", "parking"],
-    "SHOPPING": ["amazon", "target", "walmart", "costco"],
-    "UTILITIES": ["electricity", "water", "gas", "internet", "phone"],
-    "HOUSING": ["rent", "mortgage", "property tax", "home insurance"],
-    "HEALTHCARE": ["pharmacy", "doctor", "hospital", "medical"],
-    "INCOME": ["salary", "deposit", "transfer in"],
-    "OTHER": []  # Default category
+# Define category keywords
+CATEGORY_KEYWORDS = {
+    'Food & Dining': [
+        'restaurant', 'cafe', 'coffee', 'starbucks', 'uber eats', 'doordash', 'grubhub',
+        'whole foods', 'trader joe', 'grocery', 'supermarket', 'food', 'dining'
+    ],
+    'Transportation': [
+        'uber', 'lyft', 'taxi', 'transit', 'subway', 'bus', 'train', 'metro',
+        'gas', 'fuel', 'shell', 'chevron', 'exxon', 'parking', 'toll'
+    ],
+    'Shopping': [
+        'amazon', 'walmart', 'target', 'costco', 'best buy', 'ikea', 'home depot',
+        'nordstrom', 'macy', 'retail', 'store', 'shop'
+    ],
+    'Entertainment': [
+        'netflix', 'spotify', 'hulu', 'disney', 'movie', 'theater', 'concert',
+        'ticket', 'event', 'amc', 'regal'
+    ],
+    'Bills & Utilities': [
+        'electric', 'water', 'gas', 'utility', 'internet', 'phone', 'mobile',
+        'cable', 'tv', 'streaming', 'subscription'
+    ],
+    'Health & Fitness': [
+        'gym', 'fitness', 'doctor', 'medical', 'pharmacy', 'cvs', 'walgreens',
+        'health', 'dental', 'vision', 'insurance'
+    ],
+    'Travel': [
+        'hotel', 'airline', 'flight', 'airbnb', 'booking', 'expedia', 'travel',
+        'vacation', 'trip', 'resort'
+    ],
+    'Education': [
+        'school', 'university', 'college', 'tuition', 'course', 'book', 'textbook',
+        'education', 'learning', 'student'
+    ],
+    'Personal Care': [
+        'salon', 'spa', 'beauty', 'haircut', 'cosmetic', 'makeup', 'skincare',
+        'personal care', 'grooming'
+    ],
+    'Income': [
+        'salary', 'payroll', 'deposit', 'income', 'payment received', 'refund',
+        'reimbursement', 'transfer in'
+    ]
 }
 
-def classify_transactions(transactions: pd.DataFrame) -> Dict[str, Any]:
+def classify_transactions(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Categorize transactions based on their descriptions.
+    Classify transactions using rule-based keywords and ML fallback.
     
     Args:
-        transactions (pd.DataFrame): DataFrame containing transaction data
-            Expected columns: 'Date', 'Description', 'Amount'
-            
+        df: DataFrame with columns [date, description, amount]
+        
     Returns:
-        Dict[str, Any]: Dictionary containing categorized transactions and summary
-        
-    Raises:
-        ValueError: If required columns are missing
-        Exception: For other processing errors
+        DataFrame with added 'category' column
     """
+    if 'description' not in df.columns:
+        raise ValueError("DataFrame must contain 'description' column")
+    
+    # Create a copy to avoid modifying the original
+    df = df.copy()
+    
+    # Initialize category column
+    df['category'] = None
+    
+    # First pass: Rule-based classification
+    df['category'] = df['description'].apply(
+        lambda x: _rule_based_classify(x.lower()) if pd.notnull(x) else None
+    )
+    
+    # Second pass: ML classification for unclassified transactions
+    unclassified_mask = df['category'].isna()
+    if unclassified_mask.any():
+        try:
+            ml_categories = _ml_classify(df.loc[unclassified_mask, 'description'])
+            df.loc[unclassified_mask, 'category'] = ml_categories
+        except Exception as e:
+            logger.warning(f"ML classification failed: {str(e)}")
+            # If ML fails, mark remaining as "Uncategorized"
+            df.loc[unclassified_mask, 'category'] = "Uncategorized"
+    
+    return df
+
+def _rule_based_classify(description: str) -> Optional[str]:
+    """Classify transaction using keyword rules."""
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        if any(keyword in description.lower() for keyword in keywords):
+            return category
+    return None
+
+def _ml_classify(descriptions: pd.Series) -> List[str]:
+    """Classify transactions using pre-trained KMeans model."""
+    model_path = os.path.join('models', 'transaction_classifier.joblib')
+    vectorizer_path = os.path.join('models', 'transaction_vectorizer.joblib')
+    
     try:
-        # Validate required columns
-        required_columns = ['Date', 'Description', 'Amount']
-        missing_columns = [col for col in required_columns if col not in transactions.columns]
-        if missing_columns:
-            raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
-            
-        # Convert description to lowercase for case-insensitive matching
-        transactions['Description'] = transactions['Description'].str.lower()
+        # Load pre-trained model and vectorizer
+        model = joblib.load(model_path)
+        vectorizer = joblib.load(vectorizer_path)
         
-        # Initialize categories
-        categorized_transactions = {category: [] for category in CATEGORIES.keys()}
+        # Transform descriptions
+        X = vectorizer.transform(descriptions)
         
-        # Categorize each transaction
-        for _, row in transactions.iterrows():
-            description = row['Description']
-            category_found = False
-            
-            # Try to match transaction with categories
-            for category, keywords in CATEGORIES.items():
-                if any(keyword in description for keyword in keywords):
-                    categorized_transactions[category].append({
-                        'date': row['Date'],
-                        'description': description,
-                        'amount': float(row['Amount'])
-                    })
-                    category_found = True
-                    break
-            
-            # If no category found, add to OTHER
-            if not category_found:
-                categorized_transactions['OTHER'].append({
-                    'date': row['Date'],
-                    'description': description,
-                    'amount': float(row['Amount'])
-                })
+        # Get predictions
+        predictions = model.predict(X)
         
-        # Calculate summary statistics
-        summary = _calculate_summary(categorized_transactions)
-        
-        return {
-            'transactions': categorized_transactions,
-            'summary': summary
+        # Map cluster numbers to categories
+        cluster_to_category = {
+            0: 'Food & Dining',
+            1: 'Transportation',
+            2: 'Shopping',
+            3: 'Entertainment',
+            4: 'Bills & Utilities',
+            5: 'Health & Fitness',
+            6: 'Travel',
+            7: 'Education',
+            8: 'Personal Care',
+            9: 'Income'
         }
         
-    except Exception as e:
-        logger.error(f"Error categorizing transactions: {str(e)}")
-        raise Exception(f"Error categorizing transactions: {str(e)}")
-
-def _calculate_summary(categorized_transactions: Dict[str, List[Dict[str, Any]]]) -> Dict[str, float]:
-    """
-    Calculate summary statistics for each category.
-    
-    Args:
-        categorized_transactions (Dict[str, List[Dict[str, Any]]]): Categorized transactions
+        return [cluster_to_category[pred] for pred in predictions]
         
-    Returns:
-        Dict[str, float]: Summary statistics for each category
-    """
-    summary = {}
+    except FileNotFoundError:
+        logger.warning("ML model files not found. Training new model...")
+        return _train_and_classify(descriptions)
+    except Exception as e:
+        logger.error(f"Error in ML classification: {str(e)}")
+        raise
+
+def _train_and_classify(descriptions: pd.Series) -> List[str]:
+    """Train new model and classify transactions."""
+    # Initialize vectorizer
+    vectorizer = TfidfVectorizer(
+        max_features=1000,
+        stop_words='english',
+        ngram_range=(1, 2)
+    )
     
-    for category, transactions in categorized_transactions.items():
-        if transactions:
-            total_amount = sum(t['amount'] for t in transactions)
-            transaction_count = len(transactions)
-            summary[category] = {
-                'total_amount': round(total_amount, 2),
-                'transaction_count': transaction_count,
-                'average_amount': round(total_amount / transaction_count, 2) if transaction_count > 0 else 0
-            }
-        else:
-            summary[category] = {
-                'total_amount': 0,
-                'transaction_count': 0,
-                'average_amount': 0
-            }
+    # Transform descriptions
+    X = vectorizer.fit_transform(descriptions)
     
-    return summary
+    # Train KMeans model
+    n_clusters = len(CATEGORY_KEYWORDS)
+    model = KMeans(n_clusters=n_clusters, random_state=42)
+    predictions = model.fit_predict(X)
+    
+    # Save model and vectorizer
+    os.makedirs('models', exist_ok=True)
+    joblib.dump(model, os.path.join('models', 'transaction_classifier.joblib'))
+    joblib.dump(vectorizer, os.path.join('models', 'transaction_vectorizer.joblib'))
+    
+    # Map clusters to categories (this is a simple mapping, could be improved)
+    cluster_to_category = {
+        i: category for i, category in enumerate(CATEGORY_KEYWORDS.keys())
+    }
+    
+    return [cluster_to_category[pred] for pred in predictions]

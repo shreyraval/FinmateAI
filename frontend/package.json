@@ -1,0 +1,16 @@
+{
+  "name": "finmate-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "jest": "^29",
+    "@testing-library/react": "^14",
+    "@testing-library/jest-dom": "^6",
+    "cypress": "^13",
+    "cypress-cucumber-preprocessor": "^15"
+  },
+  "scripts": {
+    "test": "jest --watchAll=false",
+    "cypress": "cypress run --browser chrome"
+  }
+} 

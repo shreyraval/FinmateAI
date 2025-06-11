@@ -9,7 +9,7 @@ uploaded = st.file_uploader("Choose a PDF or CSV file")
 if uploaded:
     with st.spinner("Analyzing your statement..."):
         response = requests.post(
-            "https://finmateai.onrender.com/analyze/",
+            "http://localhost:8001/analyze/",
             files={"file": (uploaded.name, uploaded.getvalue())}
         )
 
